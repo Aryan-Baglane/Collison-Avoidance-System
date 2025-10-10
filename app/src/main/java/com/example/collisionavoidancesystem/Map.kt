@@ -1,80 +1,124 @@
 package com.example.collisionavoidancesystem
 
-import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.drawable.BitmapDrawable
-import android.graphics.drawable.Drawable
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import com.example.collisionavoidancesystem.model.VehicleData
 import com.example.collisionavoidancesystem.service.PartnerDto
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-import org.osmdroid.util.GeoPoint
-import org.osmdroid.views.MapView
-import org.osmdroid.views.overlay.Marker
-
-// Extension function to scale drawable
-fun Drawable.toScaledBitmap(width: Int, height: Int): Bitmap {
-    val bitmap = (this as BitmapDrawable).bitmap
-    return Bitmap.createScaledBitmap(bitmap, width, height, true)
-}
+import com.tomtom.sdk.common.Context
+import com.tomtom.sdk.location.GeoPoint
+import com.tomtom.sdk.map.display.MapOptions
+import com.tomtom.sdk.map.display.TomTomMap
+import com.tomtom.sdk.map.display.camera.CameraOptionsFactory
+import com.tomtom.sdk.map.display.ui.MapView
+import com.tomtom.sdk.map.display.marker.MarkerOptions
+import com.tomtom.sdk.map.display.image.ImageFactory
 
 @Composable
-fun LiveMapOSM(
+fun LiveMap(
     context: Context,
-    myVehicle: VehicleData,
-    partners: List<PartnerDto>
+    myVehicle: VehicleData?,
+    partners: List<PartnerDto>,
+    modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // State to hold the TomTomMap once it's initialized
+    var tomTomMap by remember { mutableStateOf<TomTomMap?>(null) }
+
+    // Remember the MapView instance
+    val mapView = remember {
+        MapView(
+            context,
+            MapOptions(
+                mapKey = "ca0NsFjXX0JdpzG4BAPB2HUmwmBBHqwJ" // Your API Key
+            )
+        )
+    }
+
+    // 1. Manually manage the MapView lifecycle (onStop, onResume, onDestroy)
+    DisposableEffect(lifecycleOwner) {
+        val observer = object : DefaultLifecycleObserver {
+            override fun onResume(owner: LifecycleOwner) {
+                mapView.onResume()
+            }
+            override fun onPause(owner: LifecycleOwner) {
+                mapView.onPause()
+            }
+            override fun onDestroy(owner: LifecycleOwner) {
+                mapView.onDestroy()
+                tomTomMap = null
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // 2. Safely call getMapAsync in a LaunchedEffect
+    // This is where the crash was occurring (Map.kt:74)
+    // It's still the correct place, but sometimes the view needs a moment longer.
+    LaunchedEffect(mapView) {
+        // Attempting a slight delay might resolve the internal TomTom SDK race condition
+        // if the previous crash was due to a very quick getMapAsync call.
+        // However, we will assume the correct context is enough for now.
+        mapView.getMapAsync { map ->
+            tomTomMap = map
+
+            // Initial camera move after map is ready
+            myVehicle?.let { vehicle ->
+                val cameraOptions = CameraOptionsFactory.lookAt(
+                    GeoPoint(vehicle.latitude, vehicle.longitude),
+                    zoom = 16.0
+                )
+                map.moveCamera(cameraOptions)
+            }
+        }
+    }
+
+    // 3. AndroidView Integration
     AndroidView(
-        modifier = Modifier.fillMaxSize(),
-        factory = { ctx ->
-            MapView(ctx).apply {
-                setTileSource(TileSourceFactory.MAPNIK)
-                setMultiTouchControls(true)
-                controller.setZoom(18.0)
-                controller.setCenter(GeoPoint(myVehicle.latitude, myVehicle.longitude))
-            }
+        modifier = modifier,
+        factory = {
+            // Only return the previously instantiated MapView instance.
+            mapView
         },
-        update = { mapView ->
-            mapView.overlays.clear()
+        update = {
+            // This runs on recomposition, ONLY when tomTomMap is initialized.
+            tomTomMap?.let { map ->
+                map.clear() // Clear old markers
 
-            // My vehicle marker (blue)
-            Marker(mapView).apply {
-                position = GeoPoint(myVehicle.latitude, myVehicle.longitude)
-                title = "Me (${myVehicle.id})"
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-
-                // scale icon to 64x64 pixels
-                icon = context.getDrawable(R.drawable.car)?.toScaledBitmap(64, 64)?.let {
-                    BitmapDrawable(context.resources, it)
+                // My vehicle marker
+                myVehicle?.let { vehicle ->
+                    val myMarker = MarkerOptions(
+                        coordinate = GeoPoint(vehicle.latitude, vehicle.longitude),
+                        pinImage = ImageFactory.fromResource(R.drawable.car_blue)
+                    )
+                    map.addMarker(myMarker)
                 }
 
-                mapView.overlays.add(this)
+                // Partner markers
+                partners.forEach { partner ->
+                    val pinResource = when (partner.warning) {
+                        "COLLISION_RISK" -> R.drawable.car_red
+                        "PROXIMITY" -> R.drawable.car_green
+                        else -> R.drawable.car_blue
+                    }
+
+                    val partnerMarker = MarkerOptions(
+                        coordinate = GeoPoint(partner.latitude, partner.longitude),
+                        pinImage = ImageFactory.fromResource(pinResource)
+                    )
+                    map.addMarker(partnerMarker)
+                }
             }
-
-            // Partners markers
-            partners.forEach { p ->
-                val marker = Marker(mapView).apply {
-                    position = GeoPoint(p.latitude, p.longitude)
-                    title = "Partner ${p.id} (${p.warning})"
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                }
-
-                // choose icon
-                val drawable: Drawable? = when (p.warning) {
-                    "COLLISION_RISK" -> context.getDrawable(R.drawable.car)
-                    "PROXIMITY" -> context.getDrawable(R.drawable.car)
-                    else -> if (p.isBaseStation) context.getDrawable(R.drawable.antenna) else context.getDrawable(R.drawable.car)
-                }
-
-                marker.icon = drawable?.toScaledBitmap(64, 64)?.let { BitmapDrawable(context.resources, it) }
-
-                mapView.overlays.add(marker)
-            }
-
-            mapView.invalidate()
         }
     )
 }

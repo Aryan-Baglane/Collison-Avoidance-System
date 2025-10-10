@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.collisionavoidancesystem"
-        minSdk = 24
+        minSdk = 26 // Required for TomTom SDK 1.26.0
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
@@ -27,20 +27,32 @@ android {
             )
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
     kotlinOptions {
         jvmTarget = "11"
     }
+
     buildFeatures {
         compose = true
     }
+
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.2"
+    }
 }
 
-dependencies {
+// --------------------
+// Dependencies
+// --------------------
+val tomtomVersion = "1.26.0"
 
+dependencies {
+    // AndroidX / Compose
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -49,7 +61,6 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    implementation(libs.play.services.location)
     implementation(libs.play.services.nearby)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
@@ -58,32 +69,39 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+    implementation("com.google.android.gms:play-services-location:21.1.0")
 
+    // Map / Location (TomTom SDK)
+    implementation("com.tomtom.sdk.maps:map-display:$tomtomVersion")
+    implementation("com.tomtom.sdk.location:provider-default:$tomtomVersion")
 
-        implementation ("org.maplibre.gl:android-sdk:10.2.0")
-        implementation ("org.maplibre.gl:android-plugin-annotation-v9:1.0.0")
-    implementation ("org.osmdroid:osmdroid-android:6.1.18")
+    // Other map libraries (optional, consider removing duplicates)
+    implementation("org.maplibre.gl:android-sdk:10.2.0")
+    implementation("org.maplibre.gl:android-plugin-annotation-v9:1.0.0")
+    implementation("org.osmdroid:osmdroid-android:6.1.18")
+    implementation("org.osmdroid:osmdroid-mapsforge:6.1.18")
 
-    implementation("org.osmdroid:osmdroid-android:6.1.15")
-    implementation("org.osmdroid:osmdroid-mapsforge:6.1.15")
-
+    // Networking
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.google.code.gson:gson:2.10.1")
 
-    implementation("com.squareup.okhttp3:okhttp:4.11.0")
-
+    // Kotlin coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-    implementation("com.google.code.gson:gson:2.10.1")
+
     // CameraX
     implementation("androidx.camera:camera-core:1.3.2")
     implementation("androidx.camera:camera-camera2:1.3.2")
     implementation("androidx.camera:camera-lifecycle:1.3.2")
     implementation("androidx.camera:camera-view:1.3.2")
-// OpenCV (for lane detection)
+
+    // OpenCV
     implementation("org.opencv:opencv:4.9.0")
-// Compose Canvas for overlay is already included
 
+    // Lifecycle & ViewModel
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-savedstate:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
 }
-
-
-

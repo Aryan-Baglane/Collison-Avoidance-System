@@ -20,7 +20,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CarCrash
+
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,7 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import com.example.collisionavoidancesystem.dashboard.DashboardUI
+import com.example.collisionavoidancesystem.DashboardUI
 import com.example.collisionavoidancesystem.laneKeepAssist.LaneAssistScreen
 import com.example.collisionavoidancesystem.model.VehicleData
 import com.example.collisionavoidancesystem.service.LocationService
@@ -150,15 +150,13 @@ class MainActivity : ComponentActivity() {
                                     myVehicle = myVehicle!!,
                                     partners = partners,
                                     onRefresh = {},
-                                    deviceId = deviceId,
-                                    onOpenLaneAssist = { currentScreen = "laneAssist" }
+                                    deviceId = deviceId
                                 )
                             }
 
                             "laneAssist" -> {
                                 LaneAssistScreen(
-                                    partners = partners,
-                                    onNavigateBack = { currentScreen = "dashboard" }
+                                    onBackClick = { currentScreen = "dashboard" }
                                 )
                             }
                         }

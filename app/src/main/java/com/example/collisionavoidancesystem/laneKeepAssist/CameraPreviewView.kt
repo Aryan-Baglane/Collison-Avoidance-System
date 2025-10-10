@@ -23,7 +23,7 @@ fun CameraPreviewView(
     onFrameCaptured: (Bitmap) -> Unit
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalContext.current as LifecycleOwner
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
 
     AndroidView(factory = { ctx ->
         val previewView = PreviewView(ctx)

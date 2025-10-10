@@ -1,5 +1,6 @@
 package com.example.collisionavoidancesystem
 
+
 import android.content.Context
 import android.graphics.Bitmap
 import androidx.compose.animation.animateColorAsState
@@ -20,12 +21,21 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+// NOTE: These imports rely on external files (CameraPreviewView, LaneOverlay, detectLanes, checkLaneDeparture)
 import com.example.collisionavoidancesystem.laneKeepAssist.CameraPreviewView
 import com.example.collisionavoidancesystem.laneKeepAssist.LaneOverlay
 import com.example.collisionavoidancesystem.laneKeepAssist.checkLaneDeparture
 import com.example.collisionavoidancesystem.laneKeepAssist.detectLanes
+// NOTE: These imports rely on external data models and services
 import com.example.collisionavoidancesystem.model.VehicleData
 import com.example.collisionavoidancesystem.service.PartnerDto
+import com.example.collisionavoidancesystem.service.ServerService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,6 +50,9 @@ fun DashboardUI(
     var laneKeepEnabled by remember { mutableStateOf(false) }
     var showCameraMode by remember { mutableStateOf(false) }
     var currentFrame by remember { mutableStateOf<Bitmap?>(null) }
+    var remoteLaneDetected by remember { mutableStateOf<Boolean?>(null) }
+    var remoteLaneLines by remember { mutableStateOf(0) }
+    var uploadJob by remember { mutableStateOf<Job?>(null) }
 
     val riskLevel = when {
         partners.any { it.warning == "COLLISION_RISK" } -> "DANGER"
@@ -77,8 +90,9 @@ fun DashboardUI(
             )
         },
         floatingActionButton = {
+            // NOTE: The R.drawable.map resource is required
             FloatingActionButton(onClick = { showMap = !showMap }) {
-                Icon(   painterResource(R.drawable.map), contentDescription = "Toggle Map")
+                Icon(painterResource(id = R.drawable.map), contentDescription = "Toggle Map")
             }
         }
     ) { padding ->
@@ -101,6 +115,31 @@ fun DashboardUI(
                         LaneOverlay(lanes, laneDeparture, partners)
                     }
 
+                    // Launch/stop remote lane assist uploads when toggled
+                    LaunchedEffect(showCameraMode, laneKeepEnabled) {
+                        uploadJob?.cancel()
+                        if (showCameraMode && laneKeepEnabled) {
+                            uploadJob = launch(Dispatchers.IO) {
+                                while (isActive) {
+                                    val bmp = currentFrame
+                                    if (bmp != null) {
+                                        val out = ByteArrayOutputStream()
+                                        val ok = bmp.compress(Bitmap.CompressFormat.JPEG, 70, out)
+                                        if (ok) {
+                                            // Call to ServerService
+                                            val resp = ServerService.detectLanesRemote(out.toByteArray())
+                                            if (resp != null) {
+                                                remoteLaneDetected = resp.lanes_detected
+                                                remoteLaneLines = resp.num_lines
+                                            }
+                                        }
+                                    }
+                                    delay(800)
+                                }
+                            }
+                        }
+                    }
+
                     // Collision alert overlay
                     partners.firstOrNull { it.warning == "COLLISION_RISK" }?.let {
                         Box(
@@ -115,7 +154,7 @@ fun DashboardUI(
                         }
                     }
 
-                    // My vehicle info overlay
+                    // My vehicle + remote lane info overlay
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
@@ -124,8 +163,12 @@ fun DashboardUI(
                     ) {
                         Column {
                             Text("My Vehicle: $deviceId", color = Color.White, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                            // Assuming myVehicle.speed is in km/h for the UI display
                             Text("Speed: %.1f km/h".format(myVehicle.speed), color = Color.White)
                             Text("Heading: %.1f°".format(myVehicle.heading), color = Color.White)
+                            remoteLaneDetected?.let { rd ->
+                                Text("Server Lanes: ${if (rd) "Detected" else "None"} (${remoteLaneLines})", color = Color.LightGray)
+                            }
                         }
                     }
                 }
@@ -176,7 +219,8 @@ fun DashboardUI(
                             elevation = CardDefaults.cardElevation(8.dp),
                             shape = MaterialTheme.shapes.large
                         ) {
-                            LiveMapOSM(context, myVehicle, partners)
+                            // Call to the Live Map Composable
+                            LiveMap(context, myVehicle, partners)
                         }
 
                         Spacer(Modifier.height(12.dp))
@@ -241,6 +285,7 @@ fun PartnerCardModern(partner: PartnerDto) {
             Column {
                 Text("Vehicle ID: ${partner.id}", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
                 Text("Distance: %.1f m".format(partner.distance_m))
+                // partner.speed is expected to be in m/s from the backend
                 Text("Speed: %.1f m/s".format(partner.speed))
             }
             Text(

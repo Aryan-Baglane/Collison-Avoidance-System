@@ -5,6 +5,7 @@ import android.util.Log
 import com.example.collisionavoidancesystem.model.VehicleData
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.*
+import com.google.android.gms.nearby.connection.ConnectionsClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONObject

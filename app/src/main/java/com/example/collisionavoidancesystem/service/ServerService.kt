@@ -9,7 +9,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.MultipartBody
 import java.util.*
 import java.util.concurrent.TimeUnit
 
@@ -18,6 +20,7 @@ object ServerService {
     private const val DEFAULT_SERVER = "http://192.168.31.189:8000"
     private const val WS_ENDPOINT = "/ws"
     private const val UPDATE_ENDPOINT = "/update"
+    private const val LANE_ENDPOINT = "/lane-assist"
 
     private val gson = Gson()
     private val client = OkHttpClient.Builder()
@@ -141,6 +144,47 @@ object ServerService {
             } catch (e: Exception) {
                 Log.e(TAG, "sendMyData error: ${e.message}")
             }
+        }
+    }
+
+    data class LaneAssistResponse(
+        val lanes_detected: Boolean,
+        val num_lines: Int
+    )
+
+    /**
+     * Sends an image (JPEG bytes) to the backend lane assist endpoint and parses a response.
+     * Returns null on failure.
+     */
+    suspend fun detectLanesRemote(imageJpeg: ByteArray): LaneAssistResponse? = withContext(Dispatchers.IO) {
+        try {
+            val requestBody = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart(
+                    name = "image",
+                    filename = "frame.jpg",
+                    body = imageJpeg.toRequestBody("image/jpeg".toMediaTypeOrNull())
+                )
+                .build()
+
+            val req = Request.Builder()
+                .url("$serverBase$LANE_ENDPOINT")
+                .post(requestBody)
+                .build()
+
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                val bodyStr = resp.body?.string() ?: return@withContext null
+                return@withContext try {
+                    gson.fromJson(bodyStr, LaneAssistResponse::class.java)
+                } catch (e: Exception) {
+                    Log.e(TAG, "LaneAssist parse error: ${e.message}")
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "detectLanesRemote error: ${e.message}")
+            null
         }
     }
 }
