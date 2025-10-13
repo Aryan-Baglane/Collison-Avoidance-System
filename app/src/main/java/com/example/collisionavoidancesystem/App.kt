@@ -1,8 +1,12 @@
 package com.example.collisionavoidancesystem
 
 import android.content.Context
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.activity.compose.setContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
@@ -206,9 +210,30 @@ fun <T> androidx.lifecycle.LiveData<T>.asFlow(): StateFlow<T?> {
 
 // ================== ACTIVITY ==================
 class AutoNavShareActivity : ComponentActivity() {
+    private val requiredPermissions: Array<String> by lazy {
+        arrayOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+    }
+
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { perms ->
+        if (perms.values.any { !it }) {
+            // Permissions denied; UI will remain minimal, no location updates
+            setContent { AutoNavApp() }
+        } else {
+            setContent { AutoNavApp() }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { AutoNavApp() }
+        val hasAll = requiredPermissions.all { p ->
+            ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED
+        }
+        if (!hasAll) permissionLauncher.launch(requiredPermissions) else setContent { AutoNavApp() }
     }
 }
 
@@ -242,7 +267,7 @@ private fun AutoNavApp(vm: AutoNavViewModel = androidx.lifecycle.viewmodel.compo
             }
 
             val warnings by vm.warnings.collectAsState()
-            WarningOverlay(warnings)
+
 
             showVehicleId?.let { id ->
                 VehicleDetailSheet(vm, id) { showVehicleId = null }
@@ -367,26 +392,8 @@ private fun DashboardScreen(
     }
 }
 
-// 2 & 3. Warning Overlay (Unchanged)
-@Composable
-private fun WarningOverlay(warnings: List<Warning>) {
-    if (warnings.isEmpty()) return
-    val hasCollision = warnings.any { it.type == WarningType.COLLISION }
-    val prox = warnings.firstOrNull { it.type == WarningType.PROXIMITY }
-    val bgColor by animateColorAsState(if (hasCollision) Color(0xB3FF1744) else Color(0x80321E1E), label = "")
-    val infinite = rememberInfiniteTransition(label = "pulse")
-    val alpha by infinite.animateFloat(initialValue = 0.6f, targetValue = 1f, animationSpec = infiniteRepeatable(animation = tween(700), repeatMode = RepeatMode.Reverse), label = "a")
+    // 2 & 3. Warning Overlay -> Stable status bar
 
-    Box(Modifier.fillMaxSize().background(bgColor.copy(alpha = alpha))) {
-        Column(Modifier.align(Alignment.TopCenter).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            if (hasCollision) {
-                Text("IMMINENT COLLISION!", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
-            } else if (prox != null) {
-                Text("PROXIMITY ALERT: ${prox.distanceMeters.format1()} M", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-}
 
 // 4. Settings (Unchanged)
 @OptIn(ExperimentalMaterial3Api::class)

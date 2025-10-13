@@ -53,6 +53,9 @@ fun DashboardUI(
     var remoteLaneDetected by remember { mutableStateOf<Boolean?>(null) }
     var remoteLaneLines by remember { mutableStateOf(0) }
     var uploadJob by remember { mutableStateOf<Job?>(null) }
+    var extendedMap by remember { mutableStateOf(false) }
+    var collisionProbability by remember { mutableStateOf(0) }
+    var showWarningSheet by remember { mutableStateOf(false) }
 
     val riskLevel = when {
         partners.any { it.warning == "COLLISION_RISK" } -> "DANGER"
@@ -140,17 +143,20 @@ fun DashboardUI(
                         }
                     }
 
-                    // Collision alert overlay
-                    partners.firstOrNull { it.warning == "COLLISION_RISK" }?.let {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color(0xAAFF0000))
-                                .padding(12.dp)
-                                .align(Alignment.TopCenter),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("⚠️ COLLISION RISK!", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    // Bottom popup (sheet) for collision warning instead of full-screen overlay
+                    LaunchedEffect(partners) {
+                        showWarningSheet = partners.any { it.warning == "COLLISION_RISK" }
+                    }
+                    if (showWarningSheet) {
+                        ModalBottomSheet(onDismissRequest = { showWarningSheet = false }) {
+                            Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                                Text("⚠️ Collision risk detected", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = Color(0xFFD32F2F))
+                                Spacer(Modifier.height(8.dp))
+                                Text("Reduce speed and increase following distance.")
+                                Spacer(Modifier.height(12.dp))
+                                Button(onClick = { showWarningSheet = false }) { Text("Dismiss") }
+                                Spacer(Modifier.height(12.dp))
+                            }
                         }
                     }
 
@@ -204,8 +210,16 @@ fun DashboardUI(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Lane Keep Assist", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-                        Switch(checked = laneKeepEnabled, onCheckedChange = { laneKeepEnabled = it })
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Lane Keep Assist", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                            Spacer(Modifier.width(8.dp))
+                            Switch(checked = laneKeepEnabled, onCheckedChange = { laneKeepEnabled = it })
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Extended map")
+                            Spacer(Modifier.width(8.dp))
+                            Switch(checked = extendedMap, onCheckedChange = { extendedMap = it })
+                        }
                     }
 
                     Spacer(Modifier.height(6.dp))
@@ -214,7 +228,7 @@ fun DashboardUI(
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(300.dp)
+                                .height(if (extendedMap) 520.dp else 300.dp)
                                 .padding(horizontal = 16.dp),
                             elevation = CardDefaults.cardElevation(8.dp),
                             shape = MaterialTheme.shapes.large
@@ -224,6 +238,73 @@ fun DashboardUI(
                         }
 
                         Spacer(Modifier.height(12.dp))
+
+                        // Live collision status bar (above bottom area)
+                        // Random probability until backend provides a value
+                        LaunchedEffect(partners) {
+                            // Update every second
+                            while (true) {
+                                val risk = when {
+                                    partners.any { it.warning == "COLLISION_RISK" } -> 2
+                                    partners.any { it.warning == "PROXIMITY" } -> 1
+                                    else -> 0
+                                }
+                                collisionProbability = when (risk) {
+                                    2 -> (70..95).random()
+                                    1 -> (30..60).random()
+                                    else -> 0
+                                }
+                                delay(1000)
+                            }
+                        }
+
+                        val statusColor = when {
+                            partners.any { it.warning == "COLLISION_RISK" } -> Color(0xFFD32F2F)
+                            partners.any { it.warning == "PROXIMITY" } -> Color(0xFFFFA000)
+                            else -> Color(0xFF2E7D32)
+                        }
+                        val statusText = when {
+                            partners.any { it.warning == "COLLISION_RISK" } -> "Collision risk"
+                            partners.any { it.warning == "PROXIMITY" } -> "Vehicle nearby"
+                            else -> "All clear"
+                        }
+
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            colors = CardDefaults.cardColors(containerColor = statusColor),
+                            elevation = CardDefaults.cardElevation(3.dp),
+                            shape = MaterialTheme.shapes.medium
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(statusText, color = Color.White, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                                Text("Prob: ${collisionProbability}%", color = Color.White)
+                            }
+                        }
+
+                        // Bottom popup (sheet) for collision warning in dashboard mode
+                        LaunchedEffect(partners) {
+                            showWarningSheet = partners.any { it.warning == "COLLISION_RISK" }
+                        }
+                        if (showWarningSheet) {
+                            ModalBottomSheet(onDismissRequest = { showWarningSheet = false }) {
+                                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                                    Text("⚠️ Collision risk detected", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = Color(0xFFD32F2F))
+                                    Spacer(Modifier.height(8.dp))
+                                    Text("Reduce speed and increase following distance.")
+                                    Spacer(Modifier.height(12.dp))
+                                    Button(onClick = { showWarningSheet = false }) { Text("Dismiss") }
+                                    Spacer(Modifier.height(12.dp))
+                                }
+                            }
+                        }
                     }
 
                     Text(

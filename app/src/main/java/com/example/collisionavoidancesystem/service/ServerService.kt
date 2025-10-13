@@ -18,6 +18,10 @@ import java.util.concurrent.TimeUnit
 object ServerService {
     private const val TAG = "ServerService"
     private const val DEFAULT_SERVER = "http://192.168.31.189:8000"
+    private val FALLBACK_SERVERS = listOf(
+
+        "http://192.168.31.189:8000"
+    )
     private const val WS_ENDPOINT = "/ws"
     private const val UPDATE_ENDPOINT = "/update"
     private const val LANE_ENDPOINT = "/lane-assist"
@@ -29,20 +33,30 @@ object ServerService {
         .build()
 
     private var ws: WebSocket? = null
+    @Volatile private var isWsOpen: Boolean = false
     private val _partners = MutableStateFlow<List<PartnerDto>>(emptyList())
     val partnersFlow: StateFlow<List<PartnerDto>> = _partners
 
     private var serverBase = DEFAULT_SERVER
+    private var serverRotation: List<String> = FALLBACK_SERVERS
+    private var serverIndex = 0
     private var deviceId: String = ""
+    private lateinit var appContext: Context
 
     fun init(context: Context, serverBaseUrl: String = DEFAULT_SERVER) {
-        serverBase = serverBaseUrl.trimEnd('/')
+        appContext = context.applicationContext
+        val prefs = appContext.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        // Build rotation list preferring provided URL, then fallbacks
+        val preferred = serverBaseUrl.trimEnd('/')
+        serverRotation = listOf(preferred) + FALLBACK_SERVERS.filter { it.trimEnd('/') != preferred }
+        // Use last successful server if present
+        val last = prefs.getString("server_base", null)?.trimEnd('/')
+        serverBase = (last ?: preferred).trimEnd('/')
 
-        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
         deviceId = prefs.getString("device_id", null) ?: UUID.randomUUID().toString().also { newId ->
             prefs.edit().putString("device_id", newId).apply()
         }
-
+        Log.d(TAG, "Using deviceId=$deviceId for server=$serverBase")
         connectWebSocket()
     }
 
@@ -59,6 +73,10 @@ object ServerService {
 
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     Log.d(TAG, "✅ WebSocket connected to $wsUrl")
+                    isWsOpen = true
+                    // Immediately announce presence with deviceId for servers expecting an init message
+                    val hello = gson.toJson(mapOf("type" to "hello", "id" to deviceId))
+                    webSocket.send(hello)
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
@@ -102,7 +120,16 @@ object ServerService {
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     Log.e(TAG, "❌ WebSocket failed: ${t.message}")
+                    isWsOpen = false
                     CoroutineScope(Dispatchers.IO).launch {
+                        // Rotate to next server and persist choice
+                        serverIndex = (serverIndex + 1) % serverRotation.size
+                        serverBase = serverRotation[serverIndex]
+                        Log.w(TAG, "Retrying with server=$serverBase")
+                        try {
+                            val prefs = appContext.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+                            prefs.edit().putString("server_base", serverBase).apply()
+                        } catch (_: Exception) {}
                         delay(2000)
                         connectWebSocket() // auto-reconnect
                     }
@@ -110,6 +137,7 @@ object ServerService {
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     Log.d(TAG, "🔌 WebSocket closed: $reason")
+                    isWsOpen = false
                 }
             })
         } catch (e: Exception) {
@@ -119,28 +147,39 @@ object ServerService {
 
     fun sendMyData(vehicle: VehicleData) {
         CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val payload = mapOf(
-                    "id" to vehicle.id,
-                    "latitude" to vehicle.latitude,
-                    "longitude" to vehicle.longitude,
-                    "speed" to vehicle.speed,
-                    "heading" to vehicle.heading,
-                    "role" to vehicle.role.name,
-                    "isBaseStation" to vehicle.isBaseStation,
-                    "timestamp" to System.currentTimeMillis()
-                )
+            val payload = mapOf(
+                "id" to vehicle.id,
+                "latitude" to vehicle.latitude,
+                "longitude" to vehicle.longitude,
+                "speed" to vehicle.speed,
+                "heading" to vehicle.heading,
+                "role" to vehicle.role.name,
+                "isBaseStation" to vehicle.isBaseStation,
+                "timestamp" to System.currentTimeMillis()
+            )
 
+            // Prefer websocket if connected (send over WS), but also POST to backend for state
+            val socket = ws
+            if (isWsOpen && socket != null) {
+                try {
+                    val msg = gson.toJson(mapOf("type" to "update", "data" to payload))
+                    socket.send(msg)
+                    Log.d(TAG, "📡 WS update sent")
+                } catch (e: Exception) {
+                    Log.w(TAG, "WS send failed, falling back to HTTP: ${e.message}")
+                }
+            }
+
+            // Always POST to keep backend devices dict updated
+            try {
                 val jsonBody = gson.toJson(payload)
                 val body = jsonBody.toRequestBody("application/json".toMediaType())
                 val req = Request.Builder()
                     .url("$serverBase$UPDATE_ENDPOINT")
                     .post(body)
                     .build()
-
-                val resp = client.newCall(req).execute()
-                resp.close()
-                Log.d(TAG, "📤 Vehicle data sent successfully")
+                client.newCall(req).execute().use { /* close */ }
+                Log.d(TAG, "📤 HTTP update sent")
             } catch (e: Exception) {
                 Log.e(TAG, "sendMyData error: ${e.message}")
             }

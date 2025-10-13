@@ -35,6 +35,7 @@ import com.example.collisionavoidancesystem.model.VehicleData
 import com.example.collisionavoidancesystem.service.LocationService
 import com.example.collisionavoidancesystem.service.PartnerDto
 import com.example.collisionavoidancesystem.service.ServerService
+import com.example.collisionavoidancesystem.service.NearbyService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -112,7 +113,8 @@ class MainActivity : ComponentActivity() {
 
                 // Initialize server connection
                 LaunchedEffect(Unit) {
-                    ServerService.init(this@MainActivity, "http://192.168.31.189:8000")
+                    // Let ServerService handle preferred + fallback rotation
+                    ServerService.init(this@MainActivity)
                     Log.d(TAG, "Initializing ServerService...")
 
                     lifecycleScope.launch {
@@ -171,6 +173,15 @@ class MainActivity : ComponentActivity() {
     private fun startServices() {
         Log.d(TAG, "Starting LocationService...")
         LocationService.start(this, deviceId)
+        // Initialize and start Nearby Connections
+        try {
+            NearbyService.init(applicationContext)
+            NearbyService.startAdvertising(deviceId)
+            NearbyService.startDiscovery()
+            Log.d(TAG, "NearbyService started: advertising + discovery")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start NearbyService: ${e.message}")
+        }
     }
 
     private fun startSendingTelemetryPeriodically(vehicle: VehicleData) {
@@ -178,6 +189,12 @@ class MainActivity : ComponentActivity() {
         sendJob = lifecycleScope.launch {
             while (true) {
                 ServerService.sendMyData(vehicle.copy(id = deviceId, timestamp = System.currentTimeMillis()))
+                // Also broadcast over Nearby for local peer-to-peer awareness
+                try {
+                    NearbyService.sendMyData(vehicle.copy(id = deviceId))
+                } catch (e: Exception) {
+                    Log.w(TAG, "Nearby send failed: ${e.message}")
+                }
                 delay(1000L)
             }
         }
